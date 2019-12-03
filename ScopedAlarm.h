@@ -18,19 +18,20 @@
 #define LIBMEMUNREACHABLE_SCOPED_ALARM_H_
 
 #include <signal.h>
+#include <sys/time.h>
 
 #include <chrono>
 #include <functional>
+
+namespace android {
 
 class ScopedAlarm {
  public:
   ScopedAlarm(std::chrono::microseconds us, std::function<void()> func) {
     func_ = func;
-    struct sigaction oldact{};
-    struct sigaction act{};
-    act.sa_handler = [](int) {
-      ScopedAlarm::func_();
-    };
+    struct sigaction oldact {};
+    struct sigaction act {};
+    act.sa_handler = [](int) { ScopedAlarm::func_(); };
     sigaction(SIGALRM, &act, &oldact);
 
     std::chrono::seconds s = std::chrono::duration_cast<std::chrono::seconds>(us);
@@ -42,11 +43,15 @@ class ScopedAlarm {
   ~ScopedAlarm() {
     itimerval t = itimerval{};
     setitimer(ITIMER_REAL, &t, NULL);
-    struct sigaction act{};
+    struct sigaction act {};
     act.sa_handler = SIG_DFL;
     sigaction(SIGALRM, &act, NULL);
   }
+
  private:
   static std::function<void()> func_;
 };
+
+}  // namespace android
+
 #endif

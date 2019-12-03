@@ -14,11 +14,16 @@
  * limitations under the License.
  */
 
+#include <sys/mman.h>
+#include <unistd.h>
+
 #include "HeapWalker.h"
 
-#include <gtest/gtest.h>
 #include <ScopedDisableMalloc.h>
+#include <gtest/gtest.h>
 #include "Allocator.h"
+
+namespace android {
 
 class HeapWalkerTest : public ::testing::Test {
  public:
@@ -68,6 +73,24 @@ TEST_F(HeapWalkerTest, zero) {
   ASSERT_FALSE(heap_walker.Allocation(2, 3));
 }
 
+TEST_F(HeapWalkerTest, mapping) {
+  HeapWalker heap_walker(heap_);
+  heap_walker.Mapping(2, 3);
+  heap_walker.Mapping(4, 5);
+  ASSERT_TRUE(heap_walker.Allocation(2, 3));
+  ASSERT_TRUE(heap_walker.Allocation(4, 5));
+  // space between mappings is not checked, but could be in the future
+  ASSERT_TRUE(heap_walker.Allocation(3, 4));
+
+  // re-enable malloc, ASSERT_DEATH may allocate
+  disable_malloc_.Enable();
+  ASSERT_DEATH({ heap_walker.Allocation(1, 2); }, "0x1-0x2.*outside.*0x2-0x5");
+  ASSERT_DEATH({ heap_walker.Allocation(1, 3); }, "0x1-0x3.*outside.*0x2-0x5");
+  ASSERT_DEATH({ heap_walker.Allocation(4, 6); }, "0x4-0x6.*outside.*0x2-0x5");
+  ASSERT_DEATH({ heap_walker.Allocation(5, 6); }, "0x5-0x6.*outside.*0x2-0x5");
+  ASSERT_DEATH({ heap_walker.Allocation(1, 6); }, "0x1-0x6.*outside.*0x2-0x5");
+}
+
 #define buffer_begin(buffer) reinterpret_cast<uintptr_t>(buffer)
 #define buffer_end(buffer) (reinterpret_cast<uintptr_t>(buffer) + sizeof(buffer))
 
@@ -79,6 +102,8 @@ TEST_F(HeapWalkerTest, leak) {
 
   HeapWalker heap_walker(heap_);
   heap_walker.Allocation(buffer_begin(buffer2), buffer_end(buffer2));
+
+  ASSERT_EQ(true, heap_walker.DetectLeaks());
 
   allocator::vector<Range> leaked(heap_);
   size_t num_leaks = 0;
@@ -106,9 +131,11 @@ TEST_F(HeapWalkerTest, live) {
       heap_walker.Allocation(buffer_begin(buffer2), buffer_end(buffer2));
       heap_walker.Root(buffer_begin(buffer1), buffer_end(buffer1));
 
+      ASSERT_EQ(true, heap_walker.DetectLeaks());
+
       allocator::vector<Range> leaked(heap_);
-      size_t num_leaks = SIZE_T_MAX;
-      size_t leaked_bytes = SIZE_T_MAX;
+      size_t num_leaks = SIZE_MAX;
+      size_t leaked_bytes = SIZE_MAX;
       ASSERT_EQ(true, heap_walker.Leaked(leaked, 100, &num_leaks, &leaked_bytes));
 
       EXPECT_EQ(0U, num_leaks);
@@ -132,9 +159,11 @@ TEST_F(HeapWalkerTest, unaligned) {
       heap_walker.Allocation(buffer_begin(buffer2), buffer_end(buffer2));
       heap_walker.Root(buffer_begin(buffer1) + i, buffer_end(buffer1) - j);
 
+      ASSERT_EQ(true, heap_walker.DetectLeaks());
+
       allocator::vector<Range> leaked(heap_);
-      size_t num_leaks = SIZE_T_MAX;
-      size_t leaked_bytes = SIZE_T_MAX;
+      size_t num_leaks = SIZE_MAX;
+      size_t leaked_bytes = SIZE_MAX;
       ASSERT_EQ(true, heap_walker.Leaked(leaked, 100, &num_leaks, &leaked_bytes));
 
       EXPECT_EQ(0U, num_leaks);
@@ -143,3 +172,52 @@ TEST_F(HeapWalkerTest, unaligned) {
     }
   }
 }
+
+TEST_F(HeapWalkerTest, cycle) {
+  void* buffer1;
+  void* buffer2;
+
+  buffer1 = &buffer2;
+  buffer2 = &buffer1;
+
+  HeapWalker heap_walker(heap_);
+  heap_walker.Allocation(buffer_begin(buffer1), buffer_end(buffer1));
+  heap_walker.Allocation(buffer_begin(buffer2), buffer_end(buffer2));
+
+  ASSERT_EQ(true, heap_walker.DetectLeaks());
+
+  allocator::vector<Range> leaked(heap_);
+  size_t num_leaks = 0;
+  size_t leaked_bytes = 0;
+  ASSERT_EQ(true, heap_walker.Leaked(leaked, 100, &num_leaks, &leaked_bytes));
+
+  EXPECT_EQ(2U, num_leaks);
+  EXPECT_EQ(2 * sizeof(uintptr_t), leaked_bytes);
+  ASSERT_EQ(2U, leaked.size());
+}
+
+TEST_F(HeapWalkerTest, segv) {
+  const size_t page_size = sysconf(_SC_PAGE_SIZE);
+  void* buffer1 = mmap(NULL, page_size, PROT_NONE, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
+  ASSERT_NE(buffer1, nullptr);
+  void* buffer2;
+
+  buffer2 = &buffer1;
+
+  HeapWalker heap_walker(heap_);
+  heap_walker.Allocation(buffer_begin(buffer1), buffer_begin(buffer1) + page_size);
+  heap_walker.Root(buffer_begin(buffer2), buffer_end(buffer2));
+
+  ASSERT_EQ(true, heap_walker.DetectLeaks());
+
+  allocator::vector<Range> leaked(heap_);
+  size_t num_leaks = 0;
+  size_t leaked_bytes = 0;
+  ASSERT_EQ(true, heap_walker.Leaked(leaked, 100, &num_leaks, &leaked_bytes));
+
+  EXPECT_EQ(0U, num_leaks);
+  EXPECT_EQ(0U, leaked_bytes);
+  ASSERT_EQ(0U, leaked.size());
+}
+
+}  // namespace android

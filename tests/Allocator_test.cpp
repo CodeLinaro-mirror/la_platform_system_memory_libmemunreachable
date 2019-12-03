@@ -15,53 +15,45 @@
  */
 
 #include <Allocator.h>
-#include <sys/time.h>
 
-#include <chrono>
-#include <functional>
-#include <list>
-#include <vector>
-
-#include <gtest/gtest.h>
 #include <ScopedDisableMalloc.h>
+#include <gtest/gtest.h>
 
+namespace android {
 
 std::function<void()> ScopedAlarm::func_;
-
-using namespace std::chrono_literals;
 
 class AllocatorTest : public testing::Test {
  protected:
   AllocatorTest() : heap(), disable_malloc_() {}
-  virtual void SetUp() {
-    heap_count = 0;
-  }
+  virtual void SetUp() { heap_count = 0; }
   virtual void TearDown() {
     ASSERT_EQ(heap_count, 0);
     ASSERT_TRUE(heap.empty());
     ASSERT_FALSE(disable_malloc_.timed_out());
   }
   Heap heap;
+
  private:
   ScopedDisableMallocTimeout disable_malloc_;
 };
 
 TEST_F(AllocatorTest, simple) {
   Allocator<char[100]> allocator(heap);
-  void *ptr = allocator.allocate();
+  void* ptr = allocator.allocate();
   ASSERT_TRUE(ptr != NULL);
   allocator.deallocate(ptr);
 }
 
 TEST_F(AllocatorTest, multiple) {
   Allocator<char[100]> allocator(heap);
-  void *ptr1 = allocator.allocate();
+  void* ptr1 = allocator.allocate();
   ASSERT_TRUE(ptr1 != NULL);
-  void *ptr2 = allocator.allocate();
+  void* ptr2 = allocator.allocate();
   ASSERT_TRUE(ptr2 != NULL);
   ASSERT_NE(ptr1, ptr2);
   allocator.deallocate(ptr1);
-  void *ptr3 = allocator.allocate();
+  void* ptr3 = allocator.allocate();
   ASSERT_EQ(ptr1, ptr3);
   allocator.deallocate(ptr3);
   allocator.deallocate(ptr2);
@@ -71,7 +63,7 @@ TEST_F(AllocatorTest, many) {
   const int num = 4096;
   const int size = 128;
   Allocator<char[size]> allocator(heap);
-  void *ptr[num];
+  void* ptr[num];
   for (int i = 0; i < num; i++) {
     ptr[i] = allocator.allocate();
     memset(ptr[i], 0xaa, size);
@@ -95,7 +87,7 @@ TEST_F(AllocatorTest, many) {
 TEST_F(AllocatorTest, large) {
   const size_t size = 1024 * 1024;
   Allocator<char[size]> allocator(heap);
-  void *ptr = allocator.allocate();
+  void* ptr = allocator.allocate();
   memset(ptr, 0xaa, size);
   allocator.deallocate(ptr);
 }
@@ -104,7 +96,7 @@ TEST_F(AllocatorTest, many_large) {
   const int num = 128;
   const int size = 1024 * 1024;
   Allocator<char[size]> allocator(heap);
-  void *ptr[num];
+  void* ptr[num];
   for (int i = 0; i < num; i++) {
     ptr[i] = allocator.allocate();
     memset(ptr[i], 0xaa, size);
@@ -168,7 +160,7 @@ TEST_F(AllocatorTest, shared) {
 
   Allocator<int>::shared_ptr ptr = allocator.make_shared(0);
   {
-    auto ptr2 = ptr;
+    auto ptr2 = ptr;  // NOLINT, test copy of ptr
   }
   ASSERT_NE(ptr, nullptr);
 }
@@ -181,93 +173,4 @@ TEST_F(AllocatorTest, unique) {
   ASSERT_NE(ptr, nullptr);
 }
 
-class DisableMallocTest : public ::testing::Test {
- protected:
-  void alarm(std::chrono::microseconds us) {
-    std::chrono::seconds s = std::chrono::duration_cast<std::chrono::seconds>(us);
-    itimerval t = itimerval();
-    t.it_value.tv_sec = s.count();
-    t.it_value.tv_usec = (us - s).count();
-    setitimer(ITIMER_REAL, &t, NULL);
-  }
-};
-
-TEST_F(DisableMallocTest, reenable) {
-  ASSERT_EXIT({
-    alarm(100ms);
-    void *ptr1 = malloc(128);
-    ASSERT_NE(ptr1, nullptr);
-    free(ptr1);
-    {
-      ScopedDisableMalloc disable_malloc;
-    }
-    void *ptr2 = malloc(128);
-    ASSERT_NE(ptr2, nullptr);
-    free(ptr2);
-    _exit(1);
-  }, ::testing::ExitedWithCode(1), "");
-}
-
-TEST_F(DisableMallocTest, deadlock_allocate) {
-  ASSERT_DEATH({
-    void *ptr = malloc(128);
-    ASSERT_NE(ptr, nullptr);
-    free(ptr);
-    {
-      alarm(100ms);
-      ScopedDisableMalloc disable_malloc;
-      void* ptr = malloc(128);
-      ASSERT_NE(ptr, nullptr);
-      free(ptr);
-    }
-  }, "");
-}
-
-TEST_F(DisableMallocTest, deadlock_new) {
-  ASSERT_DEATH({
-    char* ptr = new(char);
-    ASSERT_NE(ptr, nullptr);
-    delete(ptr);
-    {
-      alarm(100ms);
-      ScopedDisableMalloc disable_malloc;
-      char* ptr = new(char);
-      ASSERT_NE(ptr, nullptr);
-      delete(ptr);
-    }
-  }, "");
-}
-
-TEST_F(DisableMallocTest, deadlock_delete) {
-  ASSERT_DEATH({
-    char* ptr = new(char);
-    ASSERT_NE(ptr, nullptr);
-    {
-      alarm(250ms);
-      ScopedDisableMalloc disable_malloc;
-      delete(ptr);
-    }
-  }, "");
-}
-
-TEST_F(DisableMallocTest, deadlock_free) {
-  ASSERT_DEATH({
-    void *ptr = malloc(128);
-    ASSERT_NE(ptr, nullptr);
-    {
-      alarm(100ms);
-      ScopedDisableMalloc disable_malloc;
-      free(ptr);
-    }
-  }, "");
-}
-
-TEST_F(DisableMallocTest, deadlock_fork) {
-  ASSERT_DEATH({
-    {
-      alarm(100ms);
-      ScopedDisableMalloc disable_malloc;
-      fork();
-    }
-  }, "");
-}
+}  // namespace android

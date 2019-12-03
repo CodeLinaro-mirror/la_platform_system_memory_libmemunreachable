@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2015 The Android Open Source Project
+ * Copyright (C) 2017 The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,23 +14,15 @@
  * limitations under the License.
  */
 
-#ifndef _LIBMEMUNREACHABLE_LINE_BUFFER_H
-#define _LIBMEMUNREACHABLE_LINE_BUFFER_H
+#ifndef LIBMEMUNREACHABLE_BINDER_H_
+#define LIBMEMUNREACHABLE_BINDER_H_
 
-#include <stdint.h>
+#include "Allocator.h"
 
-class LineBuffer {
- public:
-  LineBuffer(int fd, char* buffer, size_t buffer_len);
+namespace android {
 
-  bool GetLine(char** line, size_t* line_len);
+bool BinderReferences(allocator::vector<uintptr_t>& refs);
 
- private:
-  int fd_;
-  char* buffer_ = nullptr;
-  size_t buffer_len_ = 0;
-  size_t start_ = 0;
-  size_t bytes_ = 0;
-};
+}  // namespace android
 
-#endif // _LIBMEMUNREACHABLE_LINE_BUFFER_H
+#endif  // LIBMEMUNREACHABLE_BINDER_H_

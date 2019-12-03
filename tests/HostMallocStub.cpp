@@ -14,12 +14,8 @@
  * limitations under the License.
  */
 
-#ifndef LIBMEMUNREACHABLE_ANON_VMA_NAMING_H_
-#define LIBMEMUNREACHABLE_ANON_VMA_NAMING_H_
+#include "bionic.h"
 
-#include <sys/prctl.h>
+void malloc_disable() {}
 
-#define PR_SET_VMA            0x53564d41
-#define  PR_SET_VMA_ANON_NAME 0
-
-#endif // LIBMEMUNREACHABLE_ANON_VMA_NAMING_H_
+void malloc_enable() {}
